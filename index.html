@@ -11,3 +11,33 @@ if(tab==='map'){p.innerHTML='<h2>🗺️ マップ</h2><p>配送予定に登録�
 function render(){if(tab!=='monthly'&&tab!=='invoice')return renderBase();const p=$('#panel'),month=today().slice(0,7);if(tab==='monthly'){p.innerHTML='<h2>📊 月次集計</h2><label>対象月<input type="month" id="summaryMonth" value="'+month+'"></label><div id="summaryResult"></div><button class="btn" id="summaryPrint">印刷・PDF保存</button>';const draw=()=>{const v=reportStats($('#summaryMonth').value);$('#summaryResult').innerHTML='<div class="entry"><strong>集計結果（入力済みの日報のみ）</strong><div>稼働日数：'+v.days+'日</div><div>日報：'+v.rows.length+'件</div><div>配送件数：'+v.deliveryCount+'件</div><div>拘束時間：'+(v.constrained/60).toFixed(1)+'時間</div><div>走行距離：'+v.distance.toLocaleString()+' km</div><div>休憩：'+v.breaks+'分</div><div>実働時間：'+(v.minutes/60).toFixed(1)+'時間</div><div>高速代：'+v.toll.toLocaleString()+'円</div><div>給油：'+v.liters.toFixed(1)+'L / '+v.fuel.toLocaleString()+'円</div></div><p class="muted">配送件数は日報に入力された件数を合算。時刻未入力の日報は拘束・実働時間に含まれません。</p>'};$('#summaryMonth').onchange=draw;$('#summaryPrint').onclick=()=>window.print();draw();return}p.innerHTML='<h2>🧾 請求書（簡易作成）</h2><p class="muted">手入力で請求書を作成する試作機能です。日報との自動連動・営業所別の計算規則は未実装です。</p><label>請求先<input id="billTo" placeholder="会社・営業所名"></label><label>請求日<input id="billDate" type="date" value="'+today()+'"></label><label>内容<input id="billDesc" value="配送業務委託料"></label><label>税抜金額（円）<input id="billAmount" type="number" min="0" value="0"></label><label>消費税率<select id="billTax"><option value="0.1">10%</option><option value="0.08">8%</option></select></label><div id="billPreview" class="entry"></div><button class="btn" id="billPrint">印刷・PDF保存</button>';const draw=()=>{const amount=Math.max(0,Number($('#billAmount').value)||0),tax=Math.floor(amount*Number($('#billTax').value));$('#billPreview').innerHTML='<strong>請求書（確認用）</strong><div>宛先：'+esc($('#billTo').value)+'</div><div>請求日：'+esc($('#billDate').value)+'</div><div>内容：'+esc($('#billDesc').value)+'</div><div>税抜：'+amount.toLocaleString()+'円</div><div>消費税：'+tax.toLocaleString()+'円</div><strong>税込合計：'+(amount+tax).toLocaleString()+'円</strong><p class="muted">適格請求書番号、振込先、発行者などは未記載。正式な請求書として送付する前に確認が必要です。</p>'};['billTo','billDate','billDesc','billAmount','billTax'].forEach(id=>$('#'+id).oninput=draw);$('#billPrint').onclick=()=>window.print();draw()}
 if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>show(b.dataset.tab));render();
 </script><script src="migration.js?v=2"></script></body></html>
+
+<script>
+function clockTime(d){return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+function clockReport(){return data.reports.find(r=>r.id===data.clockReportId&&!r.clockEndedAt)}
+function clockAction(action){
+ const now=new Date(),stamp=now.toISOString(),before=JSON.stringify(data);let r=clockReport();
+ if(action==='start'){
+  if(r)return;
+  r={id:'clock-'+now.getTime(),date:today(),start:clockTime(now),end:'',breakMinutes:0,clockBreakMs:0,clockStartedAt:stamp,meterStart:'',meterEnd:''};
+  data.reports.push(r);data.clockReportId=r.id;
+ }else{
+  if(!r)return;
+  if(action==='pause'){if(r.clockBreakStartedAt)return;r.clockBreakStartedAt=stamp}
+  if(action==='resume'||action==='finish'){
+   if(action==='resume'&&!r.clockBreakStartedAt)return;
+   if(action==='finish'&&!confirm('業務を終了して日報に記録しますか？'))return;
+   if(r.clockBreakStartedAt){r.clockBreakMs=(Number(r.clockBreakMs)||0)+Math.max(0,now-new Date(r.clockBreakStartedAt));r.breakMinutes=Math.round(r.clockBreakMs/60000);delete r.clockBreakStartedAt}
+   if(action==='finish'){r.end=clockTime(now);r.clockEndedAt=stamp;delete data.clockReportId}
+  }
+ }
+ if(!save()){data=JSON.parse(before);return}
+ renderClock();if(tab==='reports'&&!editingId)render();
+}
+function renderClock(){
+ const box=document.getElementById('workClock');if(!box)return;const r=clockReport();
+ box.innerHTML='<h2>⏱️ 業務の記録</h2><p aria-live="polite">'+(r?'開始 '+esc(r.date)+' '+esc(r.start)+' ／ '+(r.clockBreakStartedAt?'休憩中（'+esc(clockTime(new Date(r.clockBreakStartedAt)))+'〜）':'業務中')+' ／ 確定した休憩 '+esc(r.breakMinutes)+'分':'開始ボタンで時刻を記録します。')+'</p>'+(!r?'<button class="btn" data-clock="start">▶ 業務開始</button>':'<button class="btn" data-clock="'+(r.clockBreakStartedAt?'resume':'pause')+'">'+(r.clockBreakStartedAt?'▶ 休憩終了':'☕ 休憩開始')+'</button><button class="btn" data-clock="finish">■ 業務終了</button>')+'<p class="muted">押した時刻を自動保存。休憩は複数回分を合計します。日報で担当者・メーターなどを追記できます。</p>';
+ box.querySelectorAll('[data-clock]').forEach(b=>b.onclick=()=>clockAction(b.dataset.clock));
+}
+const clockBox=document.createElement('section');clockBox.className='panel';clockBox.id='workClock';document.getElementById('panel').before(clockBox);renderClock();window.addEventListener('focus',renderClock);
+</script>
