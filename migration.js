@@ -60,12 +60,21 @@
     sessionStorage.setItem('chibari_migration_result', JSON.stringify(counts));
     return counts;
   }
-  document.addEventListener('change', async event => {
-    if (event.target.id !== 'import' || !event.target.files?.length) return;
-    const file = event.target.files[0];
-    if (file.size > 20 * 1024 * 1024) return;
-    // The existing importer accepts this same file input. Block it only for legacy files.
-  }, true);
+  const migrationBox = document.createElement('section');
+  migrationBox.className = 'panel';
+  migrationBox.innerHTML = '<h2>旧アプリの記録を取り込む</h2><p>自動で移らなかった場合は、旧アプリからダウンロードされた「chibari-full-migration.json」を選んでください。今ある記録に追加し、同じ移行記録は重複させません。</p><label>移行ファイルを選択<input type="file" accept=".json,application/json" id="legacyMigrationFile"></label><p id="legacyMigrationStatus" role="status"></p>';
+  document.querySelector('.wrap').prepend(migrationBox);
+  const migrationFile = document.getElementById('legacyMigrationFile');
+  migrationFile.onchange = async () => {
+    const status = document.getElementById('legacyMigrationStatus');
+    try {
+      const file = migrationFile.files[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) throw Error('20MB以下のファイルを選んでください');
+      finish(JSON.parse(await file.text()));
+      location.reload();
+    } catch (error) { status.textContent = '取り込みできませんでした：' + error.message; }
+  };
   const observer = new MutationObserver(() => {
     const input = document.getElementById('import');
     if (!input || input.dataset.legacyReady) return;
